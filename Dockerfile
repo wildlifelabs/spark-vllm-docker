@@ -79,7 +79,7 @@ WORKDIR $VLLM_BASE_DIR
 #     cd nccl && make -j ${BUILD_JOBS} src.build NVCC_GENCODE="-gencode=arch=compute_121,code=sm_121" && \
 #     make pkg.debian.build && apt install -y --no-install-recommends --allow-downgrades ./build/pkg/deb/*.deb
 
-RUN git clone -b v2.30u1 https://github.com/NVIDIA/nccl.git && \
+RUN git clone https://github.com/NVIDIA/nccl.git && \
     cd nccl && make -j ${BUILD_JOBS} src.build NVCC_GENCODE="-gencode=arch=compute_121,code=sm_121" && \
     make pkg.debian.build && apt install -y --no-install-recommends --allow-downgrades --allow-change-held-packages ./build/pkg/deb/*.deb
 
@@ -191,6 +191,19 @@ COPY --from=flashinfer-builder /workspace/wheels /
 # STAGE 4: vLLM Builder
 # =========================================================
 FROM base AS vllm-builder
+ARG RUSTUP_TOOLCHAIN=stable
+ENV RUSTUP_HOME=/opt/rustup
+ENV CARGO_HOME=/opt/cargo
+ENV PATH=/opt/cargo/bin:$PATH
+ENV PROTOC_INCLUDE=/usr/include
+
+RUN apt update && \
+    apt install -y --no-install-recommends ca-certificates pkg-config protobuf-compiler libprotobuf-dev && \
+    rm -rf /var/lib/apt/lists/* && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+      sh -s -- -y --profile minimal --default-toolchain ${RUSTUP_TOOLCHAIN} --no-modify-path && \
+    rustc --version && \
+    cargo --version
 
 ARG TORCH_CUDA_ARCH_LIST="12.1a"
 ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
@@ -469,7 +482,7 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     sed -i "/flashinfer/d" requirements/cuda.txt && \
     sed -i '/^triton\b/d' requirements/test/cuda.txt && \
     sed -i '/^fastsafetensors\b/d' requirements/test/cuda.txt && \
-    uv pip install -r requirements/build/cuda.txt
+    uv pip install -r requirements/build/cuda.txt "setuptools-rust>=1.9.0"
 
 # Apply Patches
 # TEMPORARY PATCH for fastsafetensors loading in cluster setup - tracking https://github.com/vllm-project/vllm/issues/34180
@@ -486,8 +499,14 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
 # Final Compilation
 RUN --mount=type=cache,id=ccache,target=/root/.ccache \
     --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-    uv build --no-build-isolation --wheel . --out-dir=/workspace/wheels -v && \
-    # dump git ref in the wheels dir
+    --mount=type=cache,id=cargo-registry,target=/opt/cargo/registry \
+    --mount=type=cache,id=cargo-git,target=/opt/cargo/git \
+    --mount=type=cache,id=vllm-rust-target,target=/workspace/vllm/vllm/target \
+    VLLM_REQUIRE_RUST_FRONTEND=1 CARGO_BUILD_JOBS=${MAX_JOBS} \
+    uv build --no-build-isolation --wheel . --out-dir=/workspace/wheels -v
+
+# Dump git refs in the wheels dir.
+RUN \
     git rev-parse HEAD > /workspace/wheels/.vllm-commit && \
     git -C "$DEEPGEMM_SRC_DIR" rev-parse HEAD > /workspace/wheels/.deepgemm-commit
 
