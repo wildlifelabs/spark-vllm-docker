@@ -269,10 +269,9 @@ RUN --mount=type=cache,id=repo-cache,target=/repo-cache \
 WORKDIR $VLLM_BASE_DIR/vllm
 
 # Temporary upstream fixes carried until they are present in the pinned vLLM ref.
-# See https://github.com/vllm-project/vllm/pull/47445
 # See https://github.com/vllm-project/vllm/pull/47392
 # See https://github.com/vllm-project/vllm/pull/47618
-ARG VLLM_PRESET_PRS="47445 47392 47618"
+ARG VLLM_PRESET_PRS="47392 47618"
 ARG VLLM_APPLY_PRESET_PRS=""
 ARG VLLM_PRS=""
 
@@ -314,7 +313,37 @@ RUN set -eux; \
                     continue; \
                 fi; \
                 rm -f "$cherry_file"; \
-                git merge pr-${pr} --no-edit; \
+                if ! git merge pr-${pr} --no-edit; then \
+                    conflict_files="$(git diff --name-only --diff-filter=U)"; \
+                    code_conflicts=""; \
+                    for conflict_file in $conflict_files; do \
+                        case "$conflict_file" in \
+                            tests/*|docs/*|*.md|*.rst) ;; \
+                            *) code_conflicts="${code_conflicts:+$code_conflicts }$conflict_file";; \
+                        esac; \
+                    done; \
+                    if [ -z "$conflict_files" ]; then \
+                        echo "PR #$pr merge failed without unmerged files."; \
+                        git merge --abort || true; \
+                        exit 1; \
+                    fi; \
+                    if [ -n "$code_conflicts" ]; then \
+                        echo "PR #$pr has code merge conflicts: $code_conflicts"; \
+                        git merge --abort || true; \
+                        exit 1; \
+                    fi; \
+                    echo "Skipping tests/docs conflicts for PR #$pr: $conflict_files"; \
+                    for conflict_file in $conflict_files; do \
+                        git checkout --ours -- "$conflict_file"; \
+                        git add "$conflict_file"; \
+                    done; \
+                    if git diff --cached --quiet; then \
+                        echo "PR #$pr only changed conflicting tests/docs files; skipping."; \
+                        git merge --abort; \
+                    else \
+                        git commit --no-edit; \
+                    fi; \
+                fi; \
             fi; \
         done; \
     fi
