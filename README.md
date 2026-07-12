@@ -158,7 +158,7 @@ The default policy is conservative and absolute-memory based: `-M 524288,102400 
 
 `--gpu-arch` now also drives the NCCL `NVCC_GENCODE` build argument, so non-default local builds compile NCCL for the same target architecture as Torch and FlashInfer.
 
-The Dockerfile carries additional temporary vLLM workarounds for recent upstream regressions affecting DiffusionGemma Tensor causal masks, Gemma4 MTP embedding sharing, SM120 cooperative top-k selection, and the current preset PR set used for MiniMax-style support. The source-build KV-cache cleanup is now embedded directly in the Dockerfile, while `mods/kv-cache-prealloc-cleanup` keeps only the runtime policy tweaks.
+The source-build KV-cache cleanup is now embedded directly in the Dockerfile, while `mods/kv-cache-prealloc-cleanup` keeps only the runtime policy tweaks.
 
 `mods/gpu-mem-util-gb` was refreshed against current vLLM memory profiling code so fixed-GiB GPU memory reservations continue to work with the newer startup path.
 
